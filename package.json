@@ -1,0 +1,30 @@
+{
+  "name": "hyperdrive-publisher",
+  "version": "1.0.0",
+  "description": "CLI for publishing a new change to your hyperdrive and syncing it with remote peers",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RangerMauve/hyperdrive-publisher.git"
+  },
+  "keywords": [
+    "hyperdrive",
+    "sync",
+    "publish",
+    "dat"
+  ],
+  "author": "rangermauve <ranger@mauve.moe> (https://mauve.moe/)",
+  "license": "AGPL-3.0",
+  "bugs": {
+    "url": "https://github.com/RangerMauve/hyperdrive-publisher/issues"
+  },
+  "homepage": "https://github.com/RangerMauve/hyperdrive-publisher#readme",
+  "dependencies": {
+    "dat-sdk": "^2.8.1",
+    "diff-file-tree": "^2.5.0",
+    "yargs": "^16.1.0"
+  }
+}
