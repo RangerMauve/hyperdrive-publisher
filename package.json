@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "CLI for publishing a new change to your hyperdrive and syncing it with remote peers",
   "main": "index.js",
+  "bin": {
+    "hyperdrive-publisher": "bin.js"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
