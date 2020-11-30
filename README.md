@@ -45,7 +45,7 @@ CLI for publishing a new change to your hyperdrive and syncing it with remote pe
 
 `npm i --save hyperdrive-publisher`
 
-```
+```JavaScript
 const {create, sync, getURL} = require('hyperdrive-publisher')
 
 // You can generate a seed yourself
