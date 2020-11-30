@@ -98,3 +98,9 @@ You'll need to use `getURL` and add it to a `dat-store` beforehand otherwise it'
 - `fsPath` is the file path (relative to the current working directory) to sync files from
 - `drivePath` is the folder inside the hyperdrive you'd like files to be synced to
 - `verbose` controls whether there will be console output. By default it's false so that you don't have junk in your logs
+
+## Use with Github Actions
+
+You can place [./publish.yml] in your `.github/workflows/` folder and add your seed as a secret key called `PUBLISHER_KEY` in order to publish changes on every push.
+
+Make sure you have the appropriate branch set in the config, the default is `default`.
