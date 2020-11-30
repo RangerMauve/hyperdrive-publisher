@@ -6,177 +6,229 @@ const crypto = require('crypto')
 
 const DEFAULT_SYNC_TIME = 5000
 
-module.exports = { sync, create }
+module.exports = { sync, create, getURL }
 
 async function create ({
-  seed = crypto.randomBytes(32)
+  seed = crypto.randomBytes(32),
+  verbose = false
 } = {}) {
   const { Hypercore, Hyperdrive, close } = await sdkFromSeed(seed)
+  try {
+    const metadata = Hypercore('metadata')
+    const content = Hypercore('content')
 
-  const metadata = Hypercore('metadata')
-  const content = Hypercore('content')
+    await Promise.all([
+      metadata.ready(),
+      content.ready()
+    ])
 
-  await Promise.all([
-    metadata.ready(),
-    content.ready()
-  ])
+    const url = `hyper://${metadata.key.toString('hex')}`
 
-  const url = `hyper://${metadata.key.toString('hex')}`
+    if (verbose) {
+      console.log('Seed:')
+      console.log(seed.toString('hex'))
+      console.log('URL:')
+      console.log(url)
+    }
+    await metadata.append(Header.encode({
+      type: 'hypertrie',
+      metadata: content.key,
+      subtype: 'hyperdrive'
+    }))
 
-  console.log('Seed:')
-  console.log(seed.toString('hex'))
-  console.log('URL:')
-  console.log(url)
+    if (verbose) {
+      console.log('Initializing Hyperdrive')
+    }
+    const drive = Hyperdrive(metadata.key)
 
-  await metadata.append(Header.encode({
-    type: 'hypertrie',
-    metadata: content.key,
-    subtype: 'hyperdrive'
-  }))
+    await drive.ready()
 
-  console.log('Initializing Hyperdrive')
-
-  const drive = Hyperdrive(metadata.key)
-
-  await drive.ready()
-
-  const keySlice = metadata.key.slice(0, 4).toString('hex')
-  const indexJSON = `
+    const keySlice = metadata.key.slice(0, 4).toString('hex')
+    const indexJSON = `
 {
   "title": "Hyperdrive-Publisher ${keySlice}"
 }
 `
-  await drive.writeFile('/index.json', indexJSON)
+    await drive.writeFile('/index.json', indexJSON)
 
-  console.log('Please add this URL to a pinning service like dat-store to continue')
+    if (verbose) {
+      console.log('Please add this URL to a pinning service like dat-store to continue')
+      metadata.on('peer-open', (peer) => {
+        const { remoteAddress, remoteType, remotePublicKey } = peer
+        console.log('Connected', { remoteAddress, remoteType, remotePublicKey })
+      })
+    }
 
-  metadata.on('peer-open', (peer) => {
-    const { remoteAddress, remoteType, remotePublicKey } = peer
+    let hasUploaded = false
 
-    console.log('Connected', { remoteAddress, remoteType, remotePublicKey })
-  })
+    metadata.on('upload', () => {
+      hasUploaded = true
+    })
 
-  let hasUploaded = false
+    await once(metadata, 'peer-open')
 
-  metadata.on('upload', () => {
-    hasUploaded = true
-  })
+    if (verbose) {
+      console.log('Waiting to sync metadata')
+    }
+    if (!hasUploaded) {
+      await once(metadata, 'upload')
+    }
 
-  await once(metadata, 'peer-open')
+    await delay(2000)
 
-  console.log('Waiting to sync metadata')
+    if (verbose) {
+      console.log('Synced')
 
-  if (!hasUploaded) {
-    await once(metadata, 'upload')
+      console.log('You can sync a folder with:')
+      console.log(`hyperdrive-publisher sync ${seed.toString('hex')}`)
+    }
+
+    return { seed, url }
+  } finally {
+    await close()
   }
-
-  await delay(2000)
-
-  console.log('Synced')
-
-  console.log('You can sync a folder with:')
-  console.log(`hyperdrive-publisher sync ${seed.toString('hex')}`)
-
-  await close()
 }
 
 async function sync ({
   seed,
   syncTime = DEFAULT_SYNC_TIME,
   fsPath = './',
-  drivePath = '/'
+  drivePath = '/',
+  verbose = false
 }) {
+  if (!seed) throw new TypeError('Must specify seed')
   const { Hyperdrive, Hypercore, close } = await sdkFromSeed(seed)
 
-  const metadata = Hypercore('metadata', { sparse: true, eagerUpdate: true })
-  const content = Hypercore('content', { sparse: true, eagerUpdate: true })
-
-  await Promise.all([
-    metadata.ready(),
-    content.ready()
-  ])
-
-  console.log('Starting sync')
-  console.log(`hyper://${metadata.key.toString('hex')}`)
-
-  console.log('Listening for peers')
-
-  // Need to set
-  metadata.setDownloading(true)
-  content.setDownloading(true)
-
-  const [peer] = await once(metadata, 'peer-open')
-
-  console.log('Peer has header', peer.remoteBitfield.get(0))
-
-  await delay(2000)
-
-  const { remoteAddress, remoteType, remotePublicKey } = peer
-
-  console.log('Connected', { remoteAddress, remoteType, remotePublicKey })
-
-  console.log('Waiting for update', metadata.length)
-
   try {
-    await metadata.update({ ifAvailable: true, minLength: 2 })
-  } catch {
-    console.log('Unable to get update')
-  }
+    const metadata = Hypercore('metadata', { sparse: true, eagerUpdate: true })
+    const content = Hypercore('content', { sparse: true, eagerUpdate: true })
 
-  try {
-    await metadata.head()
-  } catch {
-    console.log('Unable to load latest block')
+    await Promise.all([
+      metadata.ready(),
+      content.ready()
+    ])
 
-    console.log('Initializing core')
+    const url = `hyper://${metadata.key.toString('hex')}`
 
-    await metadata.append(Header.encode({
-      type: 'hypertrie',
-      metadata: content.key,
-      subtype: 'hyperdrive'
-    }))
-  }
+    if (verbose) {
+      console.log('Starting sync')
+      console.log(url)
 
-  console.log('Initializing Hyperdrive')
+      console.log('Listening for peers')
+    }
 
-  const drive = Hyperdrive(metadata.key)
+    // Need to set
+    metadata.setDownloading(true)
+    content.setDownloading(true)
 
-  await drive.ready()
+    const [peer] = await once(metadata, 'peer-open')
 
-  console.log('Finding changed files')
+    await delay(2000)
 
-  const source = fsPath
-  const dest = { fs: drive, path: drivePath }
+    if (verbose) {
+      console.log('Peer has header', peer.remoteBitfield.get(0))
+    }
 
-  const diff = await dft.diff(source, dest, {
+    const { remoteAddress, remoteType, remotePublicKey } = peer
+    if (verbose) {
+      console.log('Connected', { remoteAddress, remoteType, remotePublicKey })
+
+      console.log('Waiting for update', metadata.length)
+    }
+    try {
+      await metadata.update({ ifAvailable: true, minLength: 2 })
+    } catch {
+      throw new Error('Unable to get Update')
+    }
+
+    try {
+      await metadata.head()
+    } catch {
+      throw new Error('Unable to get latest block, did you add the URL to a backup peer?')
+    }
+
+    if (verbose) {
+      console.log('Initializing Hyperdrive')
+    }
+    const drive = Hyperdrive(metadata.key)
+
+    await drive.ready()
+
+    if (verbose) {
+      console.log('Finding changed files')
+    }
+
+    const source = fsPath
+    const dest = { fs: drive, path: drivePath }
+
+    const diff = await dft.diff(source, dest, {
     // In case the folder's mtime is different from a git clone or something
-    compareContent: true
-  })
+      compareContent: true
+    })
 
-  console.log('Diff:', diff)
+    if (diff.length) {
+      if (verbose) {
+        console.log('Diff:', diff)
 
-  console.log('Loading into drive')
+        console.log('Loading into drive')
+      }
 
-  let hasUploaded = false
+      let hasUploaded = false
 
-  metadata.on('upload', () => {
-    hasUploaded = true
-  })
+      metadata.on('upload', () => {
+        hasUploaded = true
+      })
 
-  await dft.applyRight(source, dest, diff)
+      await dft.applyRight(source, dest, diff)
 
-  console.log('Waiting to sync with peers')
+      console.log('Waiting to sync with peers')
 
-  if (!hasUploaded) {
-    console.log('Waiting for intial upload')
-    await once(metadata, 'upload')
+      if (!hasUploaded) {
+        if (verbose) {
+          console.log('Waiting for intial upload')
+        }
+        await once(metadata, 'upload')
+      }
+
+      if (verbose) {
+        console.log(`Waiting for ${syncTime}ms to sync`)
+      }
+
+      await delay(syncTime)
+    } else {
+      if (verbose) {
+        console.log('No new changes detected', {diff})
+      }
+    }
+
+    if (verbose) {
+      console.log('Done')
+    }
+
+    return { url, diff }
+  } finally {
+    await close()
   }
+}
 
-  await delay(syncTime)
+async function getURL ({ seed, verbose }) {
+  if (!seed) throw new TypeError('Must specify seed')
+  const { Hypercore, close } = await sdkFromSeed(seed)
+  try {
+    const metadata = Hypercore('metadata')
 
-  console.log('Done')
+    await metadata.ready()
 
-  await close()
+    const url = `hyper://${metadata.key.toString('hex')}`
+
+    if (verbose) {
+      console.log(url)
+    }
+
+    return { url }
+  } finally {
+    await close()
+  }
 }
 
 async function sdkFromSeed (initialSeed) {
