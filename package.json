@@ -7,7 +7,8 @@
     "hyperdrive-publisher": "bin.js"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "format": "standard"
   },
   "repository": {
     "type": "git",
@@ -28,6 +29,10 @@
   "dependencies": {
     "dat-sdk": "^2.8.1",
     "diff-file-tree": "^2.5.0",
+    "lodash.debounce": "^4.0.8",
     "yargs": "^16.1.0"
+  },
+  "devDependencies": {
+    "standard": "^16.0.3"
   }
 }
