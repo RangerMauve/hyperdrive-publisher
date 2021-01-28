@@ -1,12 +1,14 @@
+const { join } = require('path')
 const { Header } = require('hypertrie/lib/messages')
 const SDK = require('dat-sdk')
 const { once } = require('events')
 const dft = require('diff-file-tree')
 const crypto = require('crypto')
+const debounce = require('lodash.debounce')
 
 const DEFAULT_SYNC_TIME = 5000
 
-module.exports = { sync, create, getURL }
+module.exports = { sync, create, getURL, updateStats, checkPeersSync }
 
 async function create ({
   seed = crypto.randomBytes(32),
@@ -49,6 +51,7 @@ async function create ({
   "title": "Hyperdrive-Publisher ${keySlice}"
 }
 `
+
     await drive.writeFile('/index.json', indexJSON)
 
     if (verbose) {
@@ -59,14 +62,12 @@ async function create ({
       })
     }
 
-    let hasUploaded = false
-
-    metadata.on('upload', () => {
-      hasUploaded = true
-    })
-
     await once(metadata, 'peer-open')
 
+    const stats = await updateStats(drive)
+
+    await checkPeersSync(content, stats)
+    /*
     if (verbose) {
       console.log('Waiting to sync metadata')
     }
@@ -75,6 +76,7 @@ async function create ({
     }
 
     await delay(2000)
+    */
 
     if (verbose) {
       console.log('Synced')
@@ -87,6 +89,120 @@ async function create ({
   } finally {
     await close()
   }
+}
+
+/**
+ * checkPeersSync.
+ *
+ * @description check if there is at least one peer fully synchronized (up to date) with our drive
+ * @async
+ * @param {Object} contentFeed hypercore content feed
+ * @param {Array} stats array containing { file: String, start: Number, end: Number}. start === stat.offset and end === blocks
+ * @param {[Number]} wait a number in miliseconds to use as a function timeout. Defaults to 120000 (2 minutes). OPTIONAL
+ */
+function checkPeersSync (contentFeed, stats, wait = 120000) {
+  if (!contentFeed) {
+    throw new Error('content feed is required')
+  }
+
+  const result = {}
+  result.promise = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      result.reject(new Error(`timeout exceded: ${wait}ms`))
+    }, wait)
+
+    result.resolve = () => {
+      contentFeed.off('upload', checkSync)
+      clearTimeout(timer)
+      resolve()
+    }
+
+    result.reject = err => {
+      contentFeed.off('upload', checkSync)
+      clearTimeout(timer)
+      reject(err)
+    }
+  })
+
+  const checkSync = debounce(() => {
+    console.log({ peers: contentFeed.peers })
+    console.log({ stats })
+
+    for (const peer of contentFeed.peers) {
+      // Ignore peers without remote bitfields
+      if (!peer.remoteBitfield) continue
+
+      // iterate over ranges
+      let haveAll = true
+
+      for (const stat of stats) {
+        for (let idx = stat.start; idx <= stat.end; idx++) {
+          if (idx === 0) continue
+          if (!peer.remoteBitfield.get(idx)) {
+            haveAll = false
+            break
+          }
+        }
+
+        if (!haveAll) {
+          // check next peer
+          break
+        }
+      }
+
+      if (haveAll) {
+        // content synced with at least one peer
+        return result.resolve()
+      }
+    }
+  }, 150)
+
+  checkSync()
+  contentFeed.on('upload', checkSync)
+
+  return result.promise
+}
+
+/**
+ * updateStats.
+ *
+ * @description Iterates over each file of the drive tracking start and end of each item
+ * @async
+ * @param {Object} drive Hyperdrive instance
+ * @return {Array} An array containing [<{file:String, start:Number, end:Number}>]
+ */
+async function updateStats (drive) {
+  const list = await drive.readdir('/')
+  const driveStats = []
+
+  /**
+   * syncFiles.
+   *
+   * @param {} files
+   * @param {} driveStats
+   * @param {} currentParent
+   */
+  async function syncFiles (files = [], driveStats, currentParent = '/') {
+    for (const file of files) {
+      const currentFile = join(currentParent, file)
+      const [fileStat] = await drive.stat(currentFile)
+
+      if (fileStat.isDirectory()) {
+        const newList = await drive.readdir(currentFile)
+        await syncFiles(newList, driveStats, currentFile)
+      } else {
+        driveStats.push({
+          file: currentFile,
+          start: fileStat.offset,
+          end: fileStat.blocks
+        })
+      }
+    }
+  }
+
+  await syncFiles(list, driveStats)
+
+  return driveStats
 }
 
 async function sync ({
@@ -197,7 +313,7 @@ async function sync ({
       await delay(syncTime)
     } else {
       if (verbose) {
-        console.log('No new changes detected', {diff})
+        console.log('No new changes detected', { diff })
       }
     }
 
