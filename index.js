@@ -1,4 +1,3 @@
-const { join } = require('path')
 const { Header } = require('hypertrie/lib/messages')
 const SDK = require('dat-sdk')
 const { once } = require('events')
@@ -8,7 +7,7 @@ const debounce = require('lodash.debounce')
 
 const DEFAULT_SYNC_TIME = 5000
 
-module.exports = { sync, create, getURL, updateStats, checkPeersSync }
+module.exports = { sync, create, getURL, getFileRanges, checkPeersSync }
 
 async function create ({
   seed = crypto.randomBytes(32),
@@ -64,7 +63,7 @@ async function create ({
 
     await once(metadata, 'peer-open')
 
-    const stats = await updateStats(drive)
+    const stats = await getFileRanges(drive)
 
     await checkPeersSync(content, stats)
     /*
@@ -140,7 +139,7 @@ function checkPeersSync (contentFeed, stats, wait = 120000) {
           if (idx === 0) continue
           if (!peer.remoteBitfield.get(idx)) {
             haveAll = false
-            break
+            return
           }
         }
 
@@ -164,43 +163,25 @@ function checkPeersSync (contentFeed, stats, wait = 120000) {
 }
 
 /**
- * updateStats.
+ * getFileRanges.
  *
  * @description Iterates over each file of the drive tracking start and end of each item
  * @async
  * @param {Object} drive Hyperdrive instance
  * @return {Array} An array containing [<{file:String, start:Number, end:Number}>]
  */
-async function updateStats (drive) {
-  const list = await drive.readdir('/')
+async function getFileRanges (drive) {
+  const list = await drive.stats('/')
   const driveStats = []
 
-  /**
-   * syncFiles.
-   *
-   * @param {} files
-   * @param {} driveStats
-   * @param {} currentParent
-   */
-  async function syncFiles (files = [], driveStats, currentParent = '/') {
-    for (const file of files) {
-      const currentFile = join(currentParent, file)
-      const [fileStat] = await drive.stat(currentFile)
-
-      if (fileStat.isDirectory()) {
-        const newList = await drive.readdir(currentFile)
-        await syncFiles(newList, driveStats, currentFile)
-      } else {
-        driveStats.push({
-          file: currentFile,
-          start: fileStat.offset,
-          end: fileStat.blocks
-        })
-      }
-    }
+  for (const [file] of list) {
+    const [fileStat] = await drive.stat(file)
+    driveStats.push({
+      file: file,
+      start: fileStat.offset,
+      end: fileStat.blocks
+    })
   }
-
-  await syncFiles(list, driveStats)
 
   return driveStats
 }
