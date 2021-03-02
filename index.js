@@ -4,6 +4,7 @@ const { once } = require('events')
 const dft = require('diff-file-tree')
 const crypto = require('crypto')
 const debounce = require('lodash.debounce')
+const bitfield = require('fast-bitfield')
 
 const DEFAULT_SYNC_TIME = 5000
 
@@ -63,9 +64,13 @@ async function create ({
 
     await once(metadata, 'peer-open')
 
-    const stats = await getFileRanges(drive)
+    // bitfield-like structure. Used to known start and ends of all the hyperdrive contents.
+    // Later we can use it to compare what other peers have.
+    const [, localBitfield, visited] = await getFileRanges(drive)
 
-    await checkPeersSync(content, stats)
+    await peersFullAck(localBitfield, visited)
+
+    // await checkPeersSync(content, stats)
     /*
     if (verbose) {
       console.log('Waiting to sync metadata')
@@ -91,73 +96,45 @@ async function create ({
 }
 
 /**
- * checkPeersSync.
+ * peersFullAck
  *
  * @description check if there is at least one peer fully synchronized (up to date) with our drive
  * @async
  * @param {Object} contentFeed hypercore content feed
- * @param {Array} stats array containing { file: String, start: Number, end: Number}. start === stat.offset and end === blocks
- * @param {[Number]} wait a number in miliseconds to use as a function timeout. Defaults to 120000 (2 minutes). OPTIONAL
+ * @param {Bitfield} localBitfield a copy of the local contents bitfield
+ * @param {Map} visitedStats every time a new peer-ack arrives, if the local bitfield hast the value, we mark the visitedStats removing the entry from the map.
  */
-function checkPeersSync (contentFeed, stats, wait = 120000) {
+async function peersFullAck (contentFeed, localBitfield, visitedStats) {
   if (!contentFeed) {
     throw new Error('content feed is required')
   }
 
+  // note: consider add a timeout to cancel the wait
   const result = {}
   result.promise = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      result.reject(new Error(`timeout exceded: ${wait}ms`))
-    }, wait)
-
     result.resolve = () => {
-      contentFeed.off('upload', checkSync)
-      clearTimeout(timer)
+      contentFeed.off('peer-ack', checkSync)
       resolve()
     }
 
     result.reject = err => {
-      contentFeed.off('upload', checkSync)
-      clearTimeout(timer)
+      contentFeed.off('peer-ack', checkSync)
       reject(err)
     }
   })
 
-  const checkSync = debounce(() => {
-    console.log({ peers: contentFeed.peers })
-    console.log({ stats })
-
-    for (const peer of contentFeed.peers) {
-      // Ignore peers without remote bitfields
-      if (!peer.remoteBitfield) continue
-
-      // iterate over ranges
-      let haveAll = true
-
-      for (const stat of stats) {
-        for (let idx = stat.start; idx <= stat.end; idx++) {
-          if (idx === 0) continue
-          if (!peer.remoteBitfield.get(idx)) {
-            haveAll = false
-            return
-          }
-        }
-
-        if (!haveAll) {
-          // check next peer
-          break
-        }
-      }
-
-      if (haveAll) {
-        // content synced with at least one peer
+  function checkSync (_, have) {
+    if (localBitfield.get(have.start)) {
+      // mark visited
+      visitedStats.delete(have.start)
+      if (visitedStats.size === 0) {
         return result.resolve()
       }
+    } else {
+      // this can be seen as an error or just a warning...
+      console.warn('have is not found in local bitfield. local bitfield out of sync?', { have })
     }
-  }, 150)
-
-  checkSync()
-  contentFeed.on('upload', checkSync)
+  }
 
   return result.promise
 }
@@ -168,22 +145,31 @@ function checkPeersSync (contentFeed, stats, wait = 120000) {
  * @description Iterates over each file of the drive tracking start and end of each item
  * @async
  * @param {Object} drive Hyperdrive instance
- * @return {Array} An array containing [<{file:String, start:Number, end:Number}>]
+ * @return {Array} An array containing [<{file:String, start:Number, end:Number, peersHave: Boolean}>]
  */
-async function getFileRanges (drive) {
+async function getFileRanges (drive, prevStats) {
   const list = await drive.stats('/')
-  const driveStats = []
+  const replicatedStats = prevStats || new Map()
+  const localBitfield = bitfield()
 
   for (const [file] of list) {
+    if (replicatedStats.has(file)) {
+      // skip to next file
+      continue
+    }
+
     const [fileStat] = await drive.stat(file)
-    driveStats.push({
-      file: file,
+
+    replicatedStats.set(file, {
       start: fileStat.offset,
-      end: fileStat.blocks
+      end: fileStat.blocks,
+      replicated: prevStats.false
     })
+
+    localBitfield.fill(true, fileStat.offset, fileStat.blocks)
   }
 
-  return driveStats
+  return [replicatedStats, localBitfield, new Map(replicatedStats)]
 }
 
 async function sync ({
@@ -333,7 +319,8 @@ async function sdkFromSeed (initialSeed) {
   return SDK({
     persist: false,
     corestoreOpts: {
-      masterKey: seed
+      masterKey: seed,
+      ack: true
     }
   })
 }
