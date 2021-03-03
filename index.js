@@ -3,10 +3,7 @@ const SDK = require('hyper-sdk')
 const { once } = require('events')
 const dft = require('diff-file-tree')
 const crypto = require('crypto')
-const debounce = require('lodash.debounce')
 const bitfield = require('fast-bitfield')
-
-const DEFAULT_SYNC_TIME = 5000
 
 module.exports = { sync, create, getURL }
 
@@ -69,7 +66,7 @@ async function create ({
       await once(metadata, 'peer-open')
     }
 
-    const stats = await getFileStats(drive)
+    const stats = await getFileStats(drive, ['/index.json'])
 
     if (verbose) {
       console.log('Waiting to sync metadata')
@@ -92,71 +89,8 @@ async function create ({
   }
 }
 
-/**
- * waitForFullAck
- *
- * @description check if there is at least one peer fully synchronized (up to date) with our drive
- * @async
- * @param {Object} contentFeed hypercore content feed
- * @param {Bitfield} ackBitfield a bitfield representing the blcks that have been acked
- * @param {Array} fileList the files to check against.
- */
-async function waitForFullAck (contentFeed, ackBitfield, fileList) {
-  if (!contentFeed) {
-    throw new Error('content feed is required')
-  }
-  const deferred = makeDeferred()
-  contentFeed.on('peer-ack', checkSync)
-
-  function checkSync () {
-    try {
-      // TODO: DO something fancy with bitfields
-      for (const { start, end } of fileList) {
-        for (let i = start; i < end; i++) {
-          // Missing block, should continue
-          if (!ackBitfield.has(i)) return
-        }
-      }
-
-      // Each file block must be in the bitfield!
-      deferred.resolve()
-    } catch (e) {
-      deferred.reject(e)
-    }
-  }
-  try {
-    // note: consider add a timeout to cancel the wait
-    await deferred.promise
-  } finally {
-    contentFeed.removeListener('peer-ack', checkSync)
-  }
-}
-
-/**
- * getFileStats.
- *
- * @description Iterates over each file of the drive tracking start and end of each item
- * @async
- * @param {Object} drive Hyperdrive instance
- * @return {Array} An array containing [<{file:String, start:Number, end:Number}>]
- */
-async function getFileStats (drive) {
-  const list = await drive.stats('/')
-  const stats = []
-  for (const [file, stat] of list) {
-    stats.push({
-      file,
-      start: stat.offset,
-      end: stat.offset + stat.blocks
-    })
-  }
-
-  return stats
-}
-
 async function sync ({
   seed,
-  syncTime = DEFAULT_SYNC_TIME,
   fsPath = './',
   drivePath = '/',
   verbose = false
@@ -244,11 +178,16 @@ async function sync ({
 
       await dft.applyRight(source, dest, diff)
 
+      const added = diff
+        .filter(({ change }) => ((change === 'add') || (change === 'mod')))
+        .map(({path}) => path)
+
       if (verbose) {
-        console.log('Waiting to sync metadata')
+        console.log('Loaded into drive')
+        console.log(`Waiting to sync ${added.length} files`)
       }
 
-      const stats = await getFileStats(drive)
+      const stats = await getFileStats(drive, added)
 
       await waitForFullAck(content, tracker.ackBitfield, stats)
 
@@ -300,6 +239,68 @@ async function sdkFromSeed (initialSeed) {
   })
 }
 
+/**
+ * waitForFullAck
+ *
+ * @description check if there is at least one peer fully synchronized (up to date) with our drive
+ * @async
+ * @param {Object} contentFeed hypercore content feed
+ * @param {Bitfield} ackBitfield a bitfield representing the blcks that have been acked
+ * @param {Array} fileList the files to check against.
+ */
+async function waitForFullAck (contentFeed, ackBitfield, fileList) {
+  if (!contentFeed) {
+    throw new Error('content feed is required')
+  }
+  const deferred = makeDeferred()
+  contentFeed.on('peer-ack', checkSync)
+
+  function checkSync () {
+    try {
+      // TODO: DO something fancy with bitfields
+      for (const { start, end } of fileList) {
+        for (let i = start; i < end; i++) {
+          // Missing block, should continue
+          if (!ackBitfield.has(i)) return
+        }
+      }
+
+      // Each file block must be in the bitfield!
+      deferred.resolve()
+    } catch (e) {
+      deferred.reject(e)
+    }
+  }
+  try {
+    // note: consider add a timeout to cancel the wait
+    await deferred.promise
+  } finally {
+    contentFeed.removeListener('peer-ack', checkSync)
+  }
+}
+
+/**
+ * getFileStats.
+ *
+ * @description Iterates over each file of the drive tracking start and end of each item
+ * @async
+ * @param {Object} drive Hyperdrive instance
+ * @return {Array} An array containing [<{file:String, start:Number, end:Number}>]
+ */
+async function getFileStats (drive, files = []) {
+  const stats = []
+  for (const file of files) {
+    const stat = await drive.stat(file)
+    stats.push({
+      file,
+      start: stat.offset,
+      end: stat.offset + stat.blocks
+    })
+  }
+
+  return stats
+}
+
 async function delay (time) {
   await new Promise((resolve) => setTimeout(resolve, time))
 }
@@ -312,8 +313,8 @@ function trackAckBitfield (core) {
   function onAck (peer, have) {
     if (have.ack) {
       const end = have.start + have.length
-      for(let i = have.start; i < end; i++) {
-				ackBitfield.set(i, true)
+      for (let i = have.start; i < end; i++) {
+        ackBitfield.set(i, true)
       }
       // Fill seems to be causing errors and I'm not sure why
       // ackBitfield.fill(true, have.start, have.start + have.length)
