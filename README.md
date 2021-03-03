@@ -31,9 +31,9 @@ CLI for publishing a new change to your hyperdrive and syncing it with remote pe
 - This will:
 	- Wait to connect to a peer for your drive
 	- Make sure the metadata has been synced with a peer
-	- Sync data from the `./public` folder on your filesystem to the `/website` folder in the hyperdrive	
-	- Wait for 5 seconds to sync with the peer (configurable with `--sync-time`)
-	- Exit 
+	- Sync data from the `./public` folder on your filesystem to the `/website` folder in the hyperdrive
+	- Count every block that got uploaded to a remote peer, wait for all the new files to have been uploaded
+	- Exit
 
 ### Get URL
 
@@ -90,11 +90,10 @@ You'll need to use `getURL` and add it to a `dat-store` beforehand otherwise it'
 - `url` will be the `hyper://` URL of the hyperdrive that got generated for this seed
 - `verbose` controls whether there will be console output. By default it's false so that you don't have junk in your logs
 
-### `const {diff, url} = await sync({seed, syncTime = 5000, fsPath='./', drivePath='/', verbose=false})`
+### `const {diff, url} = await sync({seed, fsPath='./', drivePath='/', verbose=false})`
 
 - `seed` is the seed used to generate the Hyperdrive, ths must be provided.
 - `url` will be the `hyper://` URL of the hyperdrive that got generated for this seed
-- `syncTime` is how long the publisher will wait for a sync to propogate to your peers starting at the initial upload
 - `fsPath` is the file path (relative to the current working directory) to sync files from
 - `drivePath` is the folder inside the hyperdrive you'd like files to be synced to
 - `verbose` controls whether there will be console output. By default it's false so that you don't have junk in your logs
@@ -104,3 +103,4 @@ You'll need to use `getURL` and add it to a `dat-store` beforehand otherwise it'
 You can place [./publish.yml] in your `.github/workflows/` folder and add your seed as a secret key called `PUBLISHER_KEY` in order to publish changes on every push.
 
 Make sure you have the appropriate branch set in the config, the default is `default`.
+

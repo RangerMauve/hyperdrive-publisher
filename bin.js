@@ -20,10 +20,6 @@ require('yargs')
     'sync <seed> [fsPath] [drivePath]',
     'sync a folder to your hyperdrive',
     {
-      syncTime: {
-        default: 5000,
-        describe: 'How long to wait to sync with remote peers'
-      },
       verbose: {
         alias: 'v',
         default: true,
