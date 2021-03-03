@@ -1,5 +1,5 @@
 const { Header } = require('hypertrie/lib/messages')
-const SDK = require('dat-sdk')
+const SDK = require('hyper-sdk')
 const { once } = require('events')
 const dft = require('diff-file-tree')
 const crypto = require('crypto')
@@ -8,7 +8,7 @@ const bitfield = require('fast-bitfield')
 
 const DEFAULT_SYNC_TIME = 5000
 
-module.exports = { sync, create, getURL, getFileRanges, checkPeersSync }
+module.exports = { sync, create, getURL }
 
 async function create ({
   seed = crypto.randomBytes(32),
@@ -23,6 +23,8 @@ async function create ({
       metadata.ready(),
       content.ready()
     ])
+
+    const tracker = trackAckBitfield(content)
 
     const url = `hyper://${metadata.key.toString('hex')}`
 
@@ -41,6 +43,7 @@ async function create ({
     if (verbose) {
       console.log('Initializing Hyperdrive')
     }
+
     const drive = Hyperdrive(metadata.key)
 
     await drive.ready()
@@ -62,25 +65,19 @@ async function create ({
       })
     }
 
-    await once(metadata, 'peer-open')
+    if (!metadata.peers.length) {
+      await once(metadata, 'peer-open')
+    }
 
-    // bitfield-like structure. Used to known start and ends of all the hyperdrive contents.
-    // Later we can use it to compare what other peers have.
-    const [, localBitfield, visited] = await getFileRanges(drive)
+    const stats = await getFileStats(drive)
 
-    await peersFullAck(localBitfield, visited)
-
-    // await checkPeersSync(content, stats)
-    /*
     if (verbose) {
       console.log('Waiting to sync metadata')
     }
-    if (!hasUploaded) {
-      await once(metadata, 'upload')
-    }
 
-    await delay(2000)
-    */
+    await waitForFullAck(content, tracker.ackBitfield, stats)
+
+    tracker.off()
 
     if (verbose) {
       console.log('Synced')
@@ -96,80 +93,65 @@ async function create ({
 }
 
 /**
- * peersFullAck
+ * waitForFullAck
  *
  * @description check if there is at least one peer fully synchronized (up to date) with our drive
  * @async
  * @param {Object} contentFeed hypercore content feed
- * @param {Bitfield} localBitfield a copy of the local contents bitfield
- * @param {Map} visitedStats every time a new peer-ack arrives, if the local bitfield hast the value, we mark the visitedStats removing the entry from the map.
+ * @param {Bitfield} ackBitfield a bitfield representing the blcks that have been acked
+ * @param {Array} fileList the files to check against.
  */
-async function peersFullAck (contentFeed, localBitfield, visitedStats) {
+async function waitForFullAck (contentFeed, ackBitfield, fileList) {
   if (!contentFeed) {
     throw new Error('content feed is required')
   }
+  const deferred = makeDeferred()
+  contentFeed.on('peer-ack', checkSync)
 
-  // note: consider add a timeout to cancel the wait
-  const result = {}
-  result.promise = new Promise((resolve, reject) => {
-    result.resolve = () => {
-      contentFeed.off('peer-ack', checkSync)
-      resolve()
-    }
-
-    result.reject = err => {
-      contentFeed.off('peer-ack', checkSync)
-      reject(err)
-    }
-  })
-
-  function checkSync (_, have) {
-    if (localBitfield.get(have.start)) {
-      // mark visited
-      visitedStats.delete(have.start)
-      if (visitedStats.size === 0) {
-        return result.resolve()
+  function checkSync () {
+    try {
+      // TODO: DO something fancy with bitfields
+      for (const { start, end } of fileList) {
+        for (let i = start; i < end; i++) {
+          // Missing block, should continue
+          if (!ackBitfield.has(i)) return
+        }
       }
-    } else {
-      // this can be seen as an error or just a warning...
-      console.warn('have is not found in local bitfield. local bitfield out of sync?', { have })
+
+      // Each file block must be in the bitfield!
+      deferred.resolve()
+    } catch (e) {
+      deferred.reject(e)
     }
   }
-
-  return result.promise
+  try {
+    // note: consider add a timeout to cancel the wait
+    await deferred.promise
+  } finally {
+    contentFeed.removeListener('peer-ack', checkSync)
+  }
 }
 
 /**
- * getFileRanges.
+ * getFileStats.
  *
  * @description Iterates over each file of the drive tracking start and end of each item
  * @async
  * @param {Object} drive Hyperdrive instance
- * @return {Array} An array containing [<{file:String, start:Number, end:Number, peersHave: Boolean}>]
+ * @return {Array} An array containing [<{file:String, start:Number, end:Number}>]
  */
-async function getFileRanges (drive, prevStats) {
+async function getFileStats (drive) {
   const list = await drive.stats('/')
-  const replicatedStats = prevStats || new Map()
-  const localBitfield = bitfield()
-
-  for (const [file] of list) {
-    if (replicatedStats.has(file)) {
-      // skip to next file
-      continue
-    }
-
-    const [fileStat] = await drive.stat(file)
-
-    replicatedStats.set(file, {
-      start: fileStat.offset,
-      end: fileStat.blocks,
-      replicated: prevStats.false
+  const stats = []
+  for (const [file, stat] of list) {
+    stats.push({
+      file,
+      start: stat.offset,
+      end: stat.offset + stat.blocks
     })
-
-    localBitfield.fill(true, fileStat.offset, fileStat.blocks)
   }
 
-  return [replicatedStats, localBitfield, new Map(replicatedStats)]
+  return stats
 }
 
 async function sync ({
@@ -190,6 +172,8 @@ async function sync ({
       metadata.ready(),
       content.ready()
     ])
+
+    const tracker = trackAckBitfield(content)
 
     const url = `hyper://${metadata.key.toString('hex')}`
 
@@ -218,6 +202,7 @@ async function sync ({
 
       console.log('Waiting for update', metadata.length)
     }
+
     try {
       await metadata.update({ ifAvailable: true, minLength: 2 })
     } catch {
@@ -233,6 +218,7 @@ async function sync ({
     if (verbose) {
       console.log('Initializing Hyperdrive')
     }
+
     const drive = Hyperdrive(metadata.key)
 
     await drive.ready()
@@ -256,28 +242,17 @@ async function sync ({
         console.log('Loading into drive')
       }
 
-      let hasUploaded = false
-
-      metadata.on('upload', () => {
-        hasUploaded = true
-      })
-
       await dft.applyRight(source, dest, diff)
 
-      console.log('Waiting to sync with peers')
-
-      if (!hasUploaded) {
-        if (verbose) {
-          console.log('Waiting for intial upload')
-        }
-        await once(metadata, 'upload')
-      }
-
       if (verbose) {
-        console.log(`Waiting for ${syncTime}ms to sync`)
+        console.log('Waiting to sync metadata')
       }
 
-      await delay(syncTime)
+      const stats = await getFileStats(drive)
+
+      await waitForFullAck(content, tracker.ackBitfield, stats)
+
+      tracker.off()
     } else {
       if (verbose) {
         console.log('No new changes detected', { diff })
@@ -327,4 +302,43 @@ async function sdkFromSeed (initialSeed) {
 
 async function delay (time) {
   await new Promise((resolve) => setTimeout(resolve, time))
+}
+
+function trackAckBitfield (core) {
+  const ackBitfield = bitfield()
+
+  core.on('peer-ack', onAck)
+
+  function onAck (peer, have) {
+    if (have.ack) {
+      const end = have.start + have.length
+      for(let i = have.start; i < end; i++) {
+				ackBitfield.set(i, true)
+      }
+      // Fill seems to be causing errors and I'm not sure why
+      // ackBitfield.fill(true, have.start, have.start + have.length)
+    } else {
+      // This isn't an ack event
+    }
+  }
+  function off () {
+    core.removeListener('peer-ack', onAck)
+  }
+
+  return {
+    ackBitfield,
+    off
+  }
+}
+
+function makeDeferred () {
+  let resolve = null
+  let reject = null
+  // eslint-disable-next-line
+  const promise = new Promise((_resolve, _reject) => {
+    resolve = _resolve
+    reject = _reject
+  })
+
+  return { promise, resolve, reject }
 }
