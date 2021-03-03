@@ -312,11 +312,12 @@ function trackAckBitfield (core) {
 
   function onAck (peer, have) {
     if (have.ack) {
+      // TODO Account for when `have.bitfield` isn't null
       const end = have.start + have.length
       for (let i = have.start; i < end; i++) {
         ackBitfield.set(i, true)
       }
-      // Fill seems to be causing errors and I'm not sure why
+      // TODO: Fill seems to be causing errors and I'm not sure why
       // ackBitfield.fill(true, have.start, have.start + have.length)
     } else {
       // This isn't an ack event
