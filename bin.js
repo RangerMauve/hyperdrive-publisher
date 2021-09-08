@@ -12,6 +12,11 @@ require('yargs')
         alias: 'v',
         default: true,
         describe: 'Toggles console output'
+      },
+      title: {
+        alias: 't',
+        describe: 'Title for your hyperdrive',
+        type: 'string'
       }
     },
     create
@@ -20,10 +25,6 @@ require('yargs')
     'sync <seed> [fsPath] [drivePath]',
     'sync a folder to your hyperdrive',
     {
-      syncTime: {
-        default: 5000,
-        describe: 'How long to wait to sync with remote peers'
-      },
       verbose: {
         alias: 'v',
         default: true,
