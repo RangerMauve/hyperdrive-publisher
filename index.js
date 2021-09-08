@@ -9,7 +9,8 @@ module.exports = { sync, create, getURL }
 
 async function create ({
   seed = crypto.randomBytes(32),
-  verbose = false
+  verbose = false,
+  title = ''
 } = {}) {
   const { Hypercore, Hyperdrive, close } = await sdkFromSeed(seed)
   try {
@@ -31,6 +32,7 @@ async function create ({
       console.log('URL:')
       console.log(url)
     }
+
     await metadata.append(Header.encode({
       type: 'hypertrie',
       metadata: content.key,
@@ -46,11 +48,12 @@ async function create ({
     await drive.ready()
 
     const keySlice = metadata.key.slice(0, 4).toString('hex')
-    const indexJSON = `
-{
-  "title": "Hyperdrive-Publisher ${keySlice}"
-}
-`
+
+    const driveTitle = title || `Hyperdrive-Publisher ${keySlice}`
+
+    const indexJSON = JSON.stringify({
+      title: driveTitle
+    }, null, '\t')
 
     await drive.writeFile('/index.json', indexJSON)
 
@@ -180,7 +183,7 @@ async function sync ({
 
       const added = diff
         .filter(({ change }) => ((change === 'add') || (change === 'mod')))
-        .map(({path}) => path)
+        .map(({ path }) => path)
 
       if (verbose) {
         console.log('Loaded into drive')
@@ -301,10 +304,6 @@ async function getFileStats (drive, files = []) {
   return stats
 }
 
-async function delay (time) {
-  await new Promise((resolve) => setTimeout(resolve, time))
-}
-
 function trackAckBitfield (core) {
   const ackBitfield = bitfield()
 
@@ -343,4 +342,8 @@ function makeDeferred () {
   })
 
   return { promise, resolve, reject }
+}
+
+async function delay (time) {
+  await new Promise((resolve) => setTimeout(resolve, time))
 }

@@ -12,6 +12,11 @@ require('yargs')
         alias: 'v',
         default: true,
         describe: 'Toggles console output'
+      },
+      title: {
+        alias: 't',
+        describe: 'Title for your hyperdrive',
+        type: 'string'
       }
     },
     create
