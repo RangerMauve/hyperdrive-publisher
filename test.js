@@ -46,9 +46,9 @@ tape('Create and sync', async (t) => {
 
     const files = await drive.readdir('/')
 
-    t.deepEqual(files.sort(), ['index.html', 'index.json'], 'Uploaded expected files')
+    t.deepEqual(files.sort(), ['example.txt', 'index.html', 'index.json'], 'Uploaded expected files')
 
-    t.equal(diff.length, 2, 'Found diffs')
+    t.equal(diff.length, 3, 'Found diffs')
   } finally {
     await cleanup()
   }
@@ -69,6 +69,28 @@ tape('Sync and tag', async (t) => {
     const tags = await drive.getAllTags()
 
     t.ok(tags.has(tag), 'Tag got created')
+  } finally {
+    await cleanup()
+  }
+})
+
+tape('Ignore during sync', async (t) => {
+  const { seed, drive, cleanup } = await setup()
+
+  try {
+    await create({ seed })
+
+    const fsPath = path.join(__dirname, 'example')
+
+    const ignore = ['index.html']
+
+    const { diff } = await sync({ seed, fsPath, ignore })
+
+    const files = await drive.readdir('/')
+
+    t.deepEqual(files.sort(), ['example.txt', 'index.json'], 'Uploaded expected files')
+
+    t.equal(diff.length, 2, 'Found diffs')
   } finally {
     await cleanup()
   }

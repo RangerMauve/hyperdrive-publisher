@@ -34,6 +34,12 @@ require('yargs')
         alias: 't',
         describe: 'Tags the updated version of the hyperdrive',
         type: 'string'
+      },
+      ignore: {
+        alias: 'i',
+        describe: 'glob patterns to ignore',
+        default: ['.git/**'],
+        type: 'array'
       }
     },
     sync

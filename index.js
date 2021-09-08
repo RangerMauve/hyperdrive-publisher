@@ -4,6 +4,7 @@ const { once } = require('events')
 const dft = require('diff-file-tree')
 const crypto = require('crypto')
 const bitfield = require('fast-bitfield')
+const anymatch = require('anymatch')
 
 module.exports = { sync, create, getURL }
 
@@ -97,6 +98,7 @@ async function sync ({
   fsPath = './',
   drivePath = '/',
   tag,
+  ignore = ['.git/**'],
   verbose = false
 }) {
   if (!seed) throw new TypeError('Must specify seed')
@@ -168,9 +170,14 @@ async function sync ({
     const source = fsPath
     const dest = { fs: drive, path: drivePath }
 
+    const filter = ignore ? makeFilter(ignore) : null
+
     const diff = await dft.diff(source, dest, {
-    // In case the folder's mtime is different from a git clone or something
-      compareContent: true
+      // In case the folder's mtime is different from a git clone or something
+      compareContent: true,
+
+      // If an ignore is specified, we should filter certain files
+      filter
     })
 
     if (diff.length) {
@@ -360,4 +367,12 @@ function makeDeferred () {
 
 async function delay (time) {
   await new Promise((resolve) => setTimeout(resolve, time))
+}
+
+function makeFilter (ignore) {
+  return function (rawPath) {
+    const file = rawPath.startsWith('/') ? rawPath.slice(1) : rawPath
+
+    return anymatch(ignore, file)
+  }
 }

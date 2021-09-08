@@ -92,13 +92,14 @@ You'll need to use `getURL` and add it to a `dat-store` beforehand otherwise it'
 - `title` will be set to the title inside the generated `index.json` which is used by tools like dat-store to show human readable titles for dirves.
 - `verbose` controls whether there will be console output. By default it's false so that you don't have junk in your logs
 
-### `const {diff, url} = await sync({seed, fsPath='./', drivePath='/', tag = undefined, verbose=false})`
+### `const {diff, url} = await sync({seed, fsPath='./', drivePath='/', tag=undefined, ignore=['.git/**'], verbose=false})`
 
 - `seed` is the seed used to generate the Hyperdrive, ths must be provided.
 - `url` will be the `hyper://` URL of the hyperdrive that got generated for this seed
 - `fsPath` is the file path (relative to the current working directory) to sync files from
 - `drivePath` is the folder inside the hyperdrive you'd like files to be synced to
 - `tag` is an optional name to tag the drive with so that you can get back to it in the history.
+- `ignore` is an optional array of strings for files and folders to ignore. Uses [anymatch](https://www.npmjs.com/package/anymatch) syntax.
 - `verbose` controls whether there will be console output. By default it's false so that you don't have junk in your logs
 
 ## Use with Github Actions
