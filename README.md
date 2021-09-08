@@ -32,6 +32,7 @@ CLI for publishing a new change to your hyperdrive and syncing it with remote pe
 	- Wait to connect to a peer for your drive
 	- Make sure the metadata has been synced with a peer
 	- Sync data from the `./public` folder on your filesystem to the `/website` folder in the hyperdrive
+  - Optionally create a `tag`
 	- Count every block that got uploaded to a remote peer, wait for all the new files to have been uploaded
 	- Exit
 
@@ -80,7 +81,7 @@ const {diff, url} = await sync({
 - `url` will be the `hyper://` URL of the hyperdrive that got generated for this seed
 - `verbose` controls whether there will be console output. By default it's false so that you don't have junk in your logs
 
-### `const {seed, url} = await create({seed = crypto.randomBytes(32), verbose=false})`
+### `const {seed, url} = await create({seed = crypto.randomBytes(32), title, verbose=false})`
 
 Creates a Hyperdrive and waits for the initial sync with a peer.
 
@@ -88,14 +89,16 @@ You'll need to use `getURL` and add it to a `dat-store` beforehand otherwise it'
 
 - `seed` is the seed used to generate the Hyperdrive, this will be auto-generated if you don't provide it, the seed will also be in the return value so you can save it
 - `url` will be the `hyper://` URL of the hyperdrive that got generated for this seed
+- `title` will be set to the title inside the generated `index.json` which is used by tools like dat-store to show human readable titles for dirves.
 - `verbose` controls whether there will be console output. By default it's false so that you don't have junk in your logs
 
-### `const {diff, url} = await sync({seed, fsPath='./', drivePath='/', verbose=false})`
+### `const {diff, url} = await sync({seed, fsPath='./', drivePath='/', tag = undefined, verbose=false})`
 
 - `seed` is the seed used to generate the Hyperdrive, ths must be provided.
 - `url` will be the `hyper://` URL of the hyperdrive that got generated for this seed
 - `fsPath` is the file path (relative to the current working directory) to sync files from
 - `drivePath` is the folder inside the hyperdrive you'd like files to be synced to
+- `tag` is an optional name to tag the drive with so that you can get back to it in the history.
 - `verbose` controls whether there will be console output. By default it's false so that you don't have junk in your logs
 
 ## Use with Github Actions

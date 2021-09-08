@@ -96,6 +96,7 @@ async function sync ({
   seed,
   fsPath = './',
   drivePath = '/',
+  tag,
   verbose = false
 }) {
   if (!seed) throw new TypeError('Must specify seed')
@@ -188,6 +189,19 @@ async function sync ({
       if (verbose) {
         console.log('Loaded into drive')
         console.log(`Waiting to sync ${added.length} files`)
+      }
+
+      if (tag) {
+        if (verbose) {
+          console.log(`Tagging current version with ${tag}`)
+        }
+
+        const version = drive.version
+        await drive.createTag(tag)
+
+        if (verbose) {
+          console.log(`Created tag at version ${version}`)
+        }
       }
 
       const stats = await getFileStats(drive, added)

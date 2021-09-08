@@ -29,6 +29,11 @@ require('yargs')
         alias: 'v',
         default: true,
         describe: 'Toggles console output'
+      },
+      tag: {
+        alias: 't',
+        describe: 'Tags the updated version of the hyperdrive',
+        type: 'string'
       }
     },
     sync

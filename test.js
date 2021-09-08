@@ -54,6 +54,26 @@ tape('Create and sync', async (t) => {
   }
 })
 
+tape('Sync and tag', async (t) => {
+  const { seed, drive, cleanup } = await setup()
+
+  try {
+    await create({ seed })
+
+    const fsPath = path.join(__dirname, 'example')
+
+    const tag = 'v1.0.0'
+
+    await sync({ seed, fsPath, tag })
+
+    const tags = await drive.getAllTags()
+
+    t.ok(tags.has(tag), 'Tag got created')
+  } finally {
+    await cleanup()
+  }
+})
+
 async function setup () {
   const { Hyperdrive, close } = await SDK({ persist: false })
   try {
