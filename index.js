@@ -23,7 +23,8 @@ async function create ({
       content.ready()
     ])
 
-    const tracker = trackAckBitfield(content)
+    const contentTracker = trackAckBitfield(content)
+    const metadataTracker = trackAckBitfield(metadata)
 
     const url = `hyper://${metadata.key.toString('hex')}`
 
@@ -76,9 +77,16 @@ async function create ({
       console.log('Waiting to sync metadata')
     }
 
-    await waitForFullAck(content, tracker.ackBitfield, stats)
+    const metadataStart = 0
+    const metadataEnd = metadata.length
 
-    tracker.off()
+    await Promise.all([
+      waitForFileAck(content, contentTracker.ackBitfield, stats),
+      waitForRangeAck(metadata, metadataTracker.ackBitfield, metadataStart, metadataEnd)
+    ])
+
+    contentTracker.off()
+    metadataTracker.off()
 
     if (verbose) {
       console.log('Synced')
@@ -113,7 +121,8 @@ async function sync ({
       content.ready()
     ])
 
-    const tracker = trackAckBitfield(content)
+    const contentTracker = trackAckBitfield(content)
+    const metadataTracker = trackAckBitfield(metadata)
 
     const url = `hyper://${metadata.key.toString('hex')}`
 
@@ -154,6 +163,8 @@ async function sync ({
     } catch {
       throw new Error('Unable to get latest block, did you add the URL to a backup peer?')
     }
+
+    const metadataStart = metadata.length + 1
 
     if (verbose) {
       console.log('Initializing Hyperdrive')
@@ -211,11 +222,17 @@ async function sync ({
         }
       }
 
+      const metadataEnd = metadata.length
+
       const stats = await getFileStats(drive, added)
 
-      await waitForFullAck(content, tracker.ackBitfield, stats)
+      await Promise.all([
+        waitForFileAck(content, contentTracker.ackBitfield, stats),
+        waitForRangeAck(metadata, metadataTracker.ackBitfield, metadataStart, metadataEnd)
+      ])
 
-      tracker.off()
+      contentTracker.off()
+      metadataTracker.off()
     } else {
       if (verbose) {
         console.log('No new changes detected', { diff })
@@ -264,7 +281,7 @@ async function sdkFromSeed (initialSeed) {
 }
 
 /**
- * waitForFullAck
+ * waitForFileAck
  *
  * @description check if there is at least one peer fully synchronized (up to date) with our drive
  * @async
@@ -272,7 +289,7 @@ async function sdkFromSeed (initialSeed) {
  * @param {Bitfield} ackBitfield a bitfield representing the blcks that have been acked
  * @param {Array} fileList the files to check against.
  */
-async function waitForFullAck (contentFeed, ackBitfield, fileList) {
+async function waitForFileAck (contentFeed, ackBitfield, fileList) {
   if (!contentFeed) {
     throw new Error('content feed is required')
   }
@@ -285,7 +302,7 @@ async function waitForFullAck (contentFeed, ackBitfield, fileList) {
       for (const { start, end } of fileList) {
         for (let i = start; i < end; i++) {
           // Missing block, should continue
-          if (!ackBitfield.has(i)) return
+          if (!ackBitfield.get(i)) return
         }
       }
 
@@ -303,6 +320,32 @@ async function waitForFullAck (contentFeed, ackBitfield, fileList) {
   }
 }
 
+async function waitForRangeAck (feed, ackBitfield, start, end) {
+  const deferred = makeDeferred()
+  feed.on('peer-ack', checkSync)
+
+  function checkSync () {
+    try {
+      for (let i = start; i < end; i++) {
+        // Missing block, should continue
+        if (!ackBitfield.get(i)) return
+      }
+
+      // Each file block must be in the bitfield!
+      deferred.resolve()
+    } catch (e) {
+      deferred.reject(e)
+    }
+  }
+
+  try {
+    // note: consider add a timeout to cancel the wait
+    await deferred.promise
+  } finally {
+    feed.removeListener('peer-ack', checkSync)
+  }
+}
+
 /**
  * getFileStats.
  *
@@ -314,7 +357,7 @@ async function waitForFullAck (contentFeed, ackBitfield, fileList) {
 async function getFileStats (drive, files = []) {
   const stats = []
   for (const file of files) {
-    const stat = await drive.stat(file)
+    const [stat] = await drive.stat(file)
     stats.push({
       file,
       start: stat.offset,
