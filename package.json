@@ -1,6 +1,6 @@
 {
   "name": "hyperdrive-publisher",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "description": "CLI for publishing a new change to your hyperdrive and syncing it with remote peers",
   "main": "index.js",
   "bin": {
